@@ -2,16 +2,16 @@ angular.module('collectRepeat', [])
 
 .factory('$repeatFactory', ['$animate', '$ionicPosition', function($animate,$ionicPosition){
 
-  var calculateParentHeight = function(collectionLength, itemHeight) {
-    return (collectionLength + 1) * itemHeight;
+  var calculateParentHeight = function(collectionLength, nodeHeight) {
+    return (collectionLength + 1) * nodeHeight;
   }
 
-  var calculateInViewCount = function(windowHeight, itemHeight, extra) {
-    return Math.ceil((windowHeight / itemHeight) + extra);
+  var calculateInViewCount = function(windowHeight, nodeHeight, extra) {
+    return Math.ceil((windowHeight / nodeHeight) + extra);
   }
 
-  var calculateScrollHeight = function(inViewCount, itemHeight) {
-    return inViewCount * itemHeight;
+  var calculateScrollHeight = function(inViewCount, nodeHeight) {
+    return inViewCount * nodeHeight;
   }
 
   var calculateEndIndex = function(collectionLength, inViewCount) {
@@ -23,9 +23,8 @@ angular.module('collectRepeat', [])
     this.collection = collection;
     this.startIndex = 0;
     this.endIndex = null;
-    this.upperThreshold = 0;
     this.lowerThreshold = null;
-    this.itemHeight = null;
+    this.nodeHeight = null;
     this.inViewCount = null;
     this.scrollHeight = null;
     this.parentElement = null;
@@ -34,28 +33,20 @@ angular.module('collectRepeat', [])
 
   RepeatManager.prototype = {
     setDefaults: function(clone, windowHeight) {
-      var itemOffset = $ionicPosition.offset(clone);
-      var itemHeight = Math.round(itemOffset.height);
-
+      // Set the view height
       this.windowHeight = windowHeight;
-      this.itemHeight = itemHeight;
-
-      this.parentHeight = calculateParentHeight(this.collection.length, this.itemHeight);
+      // Set the height for individual nodes
+      this.nodeHeight = Math.round($ionicPosition.offset(clone).height);
+      // Set the height of the enclosing parent to sums of all the nodes
+      this.parentHeight = calculateParentHeight(this.collection.length, this.nodeHeight);
       // Set the # of clones to be rendered at any given time
-      this.inViewCount = calculateInViewCount(this.windowHeight, this.itemHeight, 4);
+      this.inViewCount = calculateInViewCount(this.windowHeight, this.nodeHeight, 4);
       // Set the comparative scroll height of all the rendered divs
-      this.scrollHeight = calculateScrollHeight(this.inViewCount, this.itemHeight);
+      this.scrollHeight = calculateScrollHeight(this.inViewCount, this.nodeHeight);
       // Set the endIndex: either the collection or inViewCount, whichever is greater
       this.endIndex = calculateEndIndex(this.collection.length, this.inViewCount);
-      // Set the lowerThreshold so we know when to render a new item below the fold
-      this.setThreshold('lower', this.scrollHeight);
-    },
-    setThreshold: function(orientation, number) {
-      if(orientation === 'upper') {
-        this.upperThreshold = number;
-      } else if(orientation === 'lower') {
-        this.lowerThreshold = number;
-      }
+      // Set the lowerThreshold so we know when to render a new node below the fold
+      this.lowerThreshold = this.nodeHeight;
     },
     registerNode: function(node) {
       this.map[node.index] = node;
@@ -64,10 +55,10 @@ angular.module('collectRepeat', [])
       return !typeof node === 'undefined';
     },
     isBelowLowerThreshold: function(scrollHeight) {
-      return scrollHeight <= -(this.itemHeight*2);
+      return scrollHeight <= -(this.nodeHeight*2);
     },
     isAboveLowerThreshold: function(scrollHeight){
-      return scrollHeight >= -(this.itemHeight*2);
+      return scrollHeight >= -(this.nodeHeight*2);
     },
     isAtEndOfArray: function() {
       return this.endIndex < this.collection.length;
@@ -89,13 +80,30 @@ angular.module('collectRepeat', [])
       scope.$middle = !(scope.$first || scope.$last);
       scope.$odd = !(scope.$even = (obj.index&1) === 0);
     },
+    renderNode: function(node, parent, previous) {
+      $animate.enter(node, parent, previous);
+    },
+    removeNode: function(node) {
+      $animate.leave(node);
+    },
+    styleClone: function(clone, x) {
+      clone.style.position = 'absolute';
+      clone.style.width = '100%';
+      clone.style.transform = clone.style.webkitTransform = 'translate3d(0,' + (x + 'px') + ',0)';
+    },
+    styleParent: function(parent, height) {
+      parent.style.position = 'relative';
+      parent.style.height = height + 'px';
+    },
     transcludeClone: function(clone, scope, Manager, index, valueIdentifier, value, key, collection, previousNode) {
-      this.styleClone(clone[0], Manager.itemHeight*index);
+
+      // Position and translate the node to it's proper vertical position
+      this.styleClone(clone[0], Manager.nodeHeight*index);
 
       // Render the cloned directive onto the DOM
       this.renderNode(clone, null, angular.element(previousNode));
 
-      // Set the previousNode to this clone (used for next item)
+      // Set the previousNode to this clone (used for next node)
       previousNode = clone;
 
       // Update this clone's scope
@@ -116,21 +124,6 @@ angular.module('collectRepeat', [])
         scope: scope,
         previousNode: (index) ? previousNode : null
       });
-    },
-    renderNode: function(node, parent, previous) {
-      $animate.enter(node, parent, previous);
-    },
-    removeNode: function(node) {
-      $animate.leave(node);
-    },
-    styleClone: function(clone, x) {
-      clone.style.position = 'absolute';
-      clone.style.width = '100%';
-      clone.style.transform = clone.style.webkitTransform = 'translate3d(0,' + (x + 'px') + ',0)';
-    },
-    styleParent: function(parent, height) {
-      parent.style.position = 'relative';
-      parent.style.height = height + 'px';
     }
   }
 
@@ -154,7 +147,7 @@ angular.module('collectRepeat', [])
 
       return function($scope, $element, $attr, ctrl, $transclude) {
 
-        // Create a new object (map) to help keep track of which items have been transcluded
+        // Create a new object (map) to help keep track of which nodes have been transcluded
         var newMap = $repeatFactory.createMap();
 
         // Create a new instance of RepeatManager (the object that maintains the state of our repeat)
@@ -163,16 +156,19 @@ angular.module('collectRepeat', [])
         // Register the parent element
         Manager.parentElement = $element[0].parentElement;
 
-        // Set a watch on the collection. Every time the collection changes, this block will be executed
+      // ********* WATCH COLLECTION PROCEDURE *********
+      //  Every time the collection changes, this block will be executed.
+      //    1. Render the first element to get dimensions for the Manager
+      //    2. Loop and render only those elements that are in view
+      //    3. Set a 'scroll' event listener to render and remove depending on view
+
         $scope.$watchCollection(collection, function(collection) {
 
-        var index, length, previousNode = $element[0], collectionLength, key, value;
+          var index, length, previousNode = $element[0], collectionLength, key, value, collectionLength = collection.length;
 
-        collectionLength = collection.length;
-
-        // Query the 'scroll-content' div (specific to ionic) and set windowHeight in Manager
-        var content = document.getElementsByClassName('scroll-content');
-        var windowHeight = content[0].clientHeight;
+          // Query the 'scroll-content' div (specific to ionic) and set windowHeight in Manager
+          var content = document.getElementsByClassName('scroll-content');
+          var windowHeight = content[0].clientHeight;
 
       // ********* 1. *********
       // Render the first element to get dimensions for the Manager
@@ -188,8 +184,10 @@ angular.module('collectRepeat', [])
 
             // Set the default values for the Manager
             Manager.setDefaults(clone, windowHeight);
+
           });
 
+          // Set it's position to relative and change it's height to accommodate all the nodes
           $repeatFactory.styleParent(Manager.parentElement, Manager.parentHeight);
 
       // ********* 2. *********
@@ -234,11 +232,12 @@ angular.module('collectRepeat', [])
               // Has the node already been registered with the Manager?
               if(Manager.isNodeRegistered(key)) {
 
-                // Render the node
+                // Render the registered node
                 $repeatFactory.renderNode(Manager.map[Manager.endIndex].clone, Manager.parentElement, null);
 
               } else {
 
+                // Register and render a new clone
                 $transclude(function(clone, scope) {
 
                   $repeatFactory.transcludeClone(clone, scope, Manager, index, valueIdentifier, value, key, collection, previousNode);
@@ -250,15 +249,18 @@ angular.module('collectRepeat', [])
               // Is the view set to it's top most position?
               if(Manager.startIndex === 0) return;
 
-              $repeatFactory.removeNode(Manager.map[--Manager.startIndex].clone);
-              Manager.startIndex++;
+              // Remove the top node
+              $repeatFactory.removeNode(Manager.map[Manager.startIndex].previousNode);
+
 
             } else if(Manager.isAboveLowerThreshold(scrollHeight)) {
 
               // Is the view set to it's top most position?
               if(Manager.startIndex === 0) return;
 
-              $repeatFactory.renderNode(Manager.map[--Manager.startIndex].clone, null, $element[0]);
+              // Render the top node
+              $repeatFactory.renderNode(Manager.map[Manager.startIndex--].previousNode, null, $element[0]);
+              // Remove the bottom node
               $repeatFactory.removeNode(Manager.map[Manager.endIndex--].clone);
 
             }
