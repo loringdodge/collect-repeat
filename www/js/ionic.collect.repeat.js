@@ -6,8 +6,8 @@ angular.module('collectRepeat', [])
     return (collectionLength + 1) * nodeHeight;
   }
 
-  var calculateInViewCount = function(windowHeight, nodeHeight, extra) {
-    return Math.ceil((windowHeight / nodeHeight) + extra);
+  var calculateInViewCount = function(viewHeight, nodeHeight, extra) {
+    return Math.ceil((viewHeight / nodeHeight) + extra);
   }
 
   var calculateScrollHeight = function(inViewCount, nodeHeight) {
@@ -32,15 +32,15 @@ angular.module('collectRepeat', [])
   }
 
   RepeatManager.prototype = {
-    setDefaults: function(clone, windowHeight) {
+    setDefaults: function(clone, viewHeight) {
       // Set the view height
-      this.windowHeight = windowHeight;
+      this.viewHeight = viewHeight;
       // Set the height for individual nodes
       this.nodeHeight = Math.round($ionicPosition.offset(clone).height);
       // Set the height of the enclosing parent to sums of all the nodes
       this.parentHeight = calculateParentHeight(this.collection.length, this.nodeHeight);
       // Set the # of clones to be rendered at any given time
-      this.inViewCount = calculateInViewCount(this.windowHeight, this.nodeHeight, 4);
+      this.inViewCount = calculateInViewCount(this.viewHeight, this.nodeHeight, 4);
       // Set the comparative scroll height of all the rendered divs
       this.scrollHeight = calculateScrollHeight(this.inViewCount, this.nodeHeight);
       // Set the endIndex: either the collection or inViewCount, whichever is greater
@@ -166,9 +166,9 @@ angular.module('collectRepeat', [])
 
           var index, length, previousNode = $element[0], collectionLength, key, value, collectionLength = collection.length;
 
-          // Query the 'scroll-content' div (specific to ionic) and set windowHeight in Manager
+          // Query the 'scroll-content' div (specific to ionic) and set viewHeight in Manager
           var content = document.getElementsByClassName('scroll-content');
-          var windowHeight = content[0].clientHeight;
+          var viewHeight = content[0].clientHeight;
 
       // ********* 1. *********
       // Render the first element to get dimensions for the Manager
@@ -183,7 +183,7 @@ angular.module('collectRepeat', [])
             $repeatFactory.transcludeClone(clone, scope, Manager, index, valueIdentifier, value, key, collection, previousNode);
 
             // Set the default values for the Manager
-            Manager.setDefaults(clone, windowHeight);
+            Manager.setDefaults(clone, viewHeight);
 
           });
 
